@@ -22,6 +22,12 @@ if (!appKey || !appSecret || !accessToken || !accessSecret || !redisUrl) {
   console.log("All required environment variables are set");
 }
 
+const topAccountIds = [
+  "44196397", // Twitter Dev account
+  "2244994945", // Twitter API account
+  "783214", // Twitter account
+];
+
 // Initialize Redis client with Redis URL and connect
 const redisClient = createClient({
   url: redisUrl,
@@ -97,6 +103,27 @@ cron.schedule("*/20 * * * *", async () => {
   }
 });
 
+// Cronjob to send comment to top accounts every 15 minutes. We get the latest tweet in their timeline
+cron.schedule("*/15 * * * *", async () => {
+  try {
+    for (const accountId of topAccountIds) {
+      const timeline = await client.v2.userTimeline(accountId, {
+        max_results: 1,
+      });
+      if (timeline.data.data.length > 0) {
+        const tweetId = timeline.data.data[0].id;
+        const commentText = `Great tweet!`;
+        await rwClient.v2.reply(commentText, tweetId);
+        console.log(`Commented on tweet: ${tweetId}`);
+      } else {
+        console.log(`No tweets found for account ID: ${accountId}`);
+      }
+    }
+  } catch (error) {
+    console.error("Error fetching user timeline:", error);
+  }
+});
+
 /**
  * API Endpoints
  * - /tweet: Post a tweet
@@ -104,6 +131,7 @@ cron.schedule("*/20 * * * *", async () => {
  * - /like/:id: Like a tweet by ID
  * - /quote/:id: Quote a tweet by ID
  * - /mentions: Get user mentions
+ * - /comment/:id: Comment on a tweet by ID
  */
 
 // API endpoint to post a tweet
@@ -155,12 +183,36 @@ app.post("/quote/:id", async (req, res) => {
   }
 });
 
-// api endpoint to get user mentions
+// API endpoint to get user mentions
 app.get("/mentions", async (req, res) => {
   try {
     const user = await client.v2.me();
     const mentions = await client.v2.userMentionTimeline(user.data.id);
     res.json({ success: true, mentions });
+  } catch (error) {
+    res.status(500).json({ success: false, error });
+  }
+});
+
+// API endpoint to comment on a tweet
+app.post("/comment/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { comment } = req.body;
+    const tweet = await rwClient.v2.reply(comment, id);
+    res.json({ success: true, tweet });
+  } catch (error) {
+    res.status(500).json({ success: false, error });
+  }
+});
+
+// API endpoint to get user timeline
+app.get("/timeline/:username", async (req, res) => {
+  try {
+    const { username } = req.params;
+    const user = await client.v2.userByUsername(username);
+    const timeline = await client.v2.userTimeline(user.data.id);
+    res.json({ success: true, timeline });
   } catch (error) {
     res.status(500).json({ success: false, error });
   }
