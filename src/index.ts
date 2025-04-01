@@ -44,16 +44,22 @@ const client = new TwitterApi({
 });
 const rwClient = client.readWrite;
 
-// // Cron job to tweet every hour
-// cron.schedule("0 * * * *", async () => {
-//   try {
-//     const tweet = `Automated Tweet at ${new Date().toLocaleTimeString()}`;
-//     await rwClient.v2.tweet(tweet);
-//     console.log(`Tweet sent: ${tweet}`);
-//   } catch (error) {
-//     console.error("Error sending tweet:", error);
-//   }
-// });
+/**
+ * Cron Jobs
+ * - Tweet every hour
+ * - Reply to mentions every 20 minutes
+ */
+
+// Cron job to tweet every hour
+cron.schedule("0 * * * *", async () => {
+  try {
+    const tweet = `Automated Tweet at ${new Date().toLocaleTimeString()}`;
+    await rwClient.v2.tweet(tweet);
+    console.log(`Tweet sent: ${tweet}`);
+  } catch (error) {
+    console.error("Error sending tweet:", error);
+  }
+});
 
 // Cron job to reply to mentions every 20 minutes
 cron.schedule("*/20 * * * *", async () => {
@@ -63,13 +69,26 @@ cron.schedule("*/20 * * * *", async () => {
     // We need to check last mention ID to avoid replying to the same mention from redis cache
     const lastMentionId = await redisClient.get(`${cachePrefix}:lastMentionId`);
     if (mentions.data.data.length > 0) {
-      const latestMention = mentions.data.data[0];
-      if (lastMentionId !== latestMention.id) {
-        await rwClient.v2.reply(`Thanks for the mention!`, latestMention.id);
-        console.log(`Replied to mention already: ${latestMention.id}`);
-        // Update last mention ID in Redis cache
-        await redisClient.set(`${cachePrefix}:lastMentionId`, latestMention.id);
+      // Reply to all unReplied mentions after the last mention ID
+      const unRepliedMentions = mentions.data.data.filter(
+        (mention) => lastMentionId === null || mention.id > lastMentionId
+      );
+
+      if (unRepliedMentions.length === 0) {
+        console.log("No new mentions to reply to.");
+        return;
       }
+      console.log(`Found ${unRepliedMentions.length} new mentions.`);
+      for (const mention of unRepliedMentions) {
+        const replyText = `Thanks for the mention!`;
+        await rwClient.v2.reply(replyText, mention.id);
+        console.log(`Replied to mention: ${mention.id}`);
+      }
+      // Update the last mention ID in Redis
+      await redisClient.set(
+        `${cachePrefix}:lastMentionId`,
+        mentions.data.data[0].id
+      );
     } else {
       console.log("No new mentions found.");
     }
@@ -77,6 +96,15 @@ cron.schedule("*/20 * * * *", async () => {
     console.error("Error fetching user mentions:", error);
   }
 });
+
+/**
+ * API Endpoints
+ * - /tweet: Post a tweet
+ * - /retweet/:id: Retweet a tweet by ID
+ * - /like/:id: Like a tweet by ID
+ * - /quote/:id: Quote a tweet by ID
+ * - /mentions: Get user mentions
+ */
 
 // API endpoint to post a tweet
 app.post("/tweet", async (req, res) => {
