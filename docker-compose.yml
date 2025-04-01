@@ -1,0 +1,28 @@
+version: "3.8"
+
+services:
+  app:
+    image: node:20
+    container_name: express_twitter_bot
+    working_dir: /app
+    volumes:
+      - .:/app
+    restart: always
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://default@redis:6379
+    depends_on:
+      - redis
+    ports:
+      - "3000:3000"
+    command: >
+      sh -c "yarn && yarn start"
+
+  redis:
+    image: redis:alpine
+    container_name: redis_service
+    restart: always
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
