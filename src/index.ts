@@ -3,6 +3,7 @@ import { TwitterApi } from "twitter-api-v2";
 import cron from "node-cron";
 import dotenv from "dotenv";
 import { createClient } from "redis";
+import { deepSeekResponse } from "./response";
 
 // Environment variables
 // Load environment variables from .env file
@@ -57,72 +58,72 @@ const rwClient = client.readWrite;
  */
 
 // Cron job to tweet every hour
-cron.schedule("0 * * * *", async () => {
-  try {
-    const tweet = `Automated Tweet at ${new Date().toLocaleTimeString()}`;
-    await rwClient.v2.tweet(tweet);
-    console.log(`Tweet sent: ${tweet}`);
-  } catch (error) {
-    console.error("Error sending tweet:", error);
-  }
-});
+// cron.schedule("0 * * * *", async () => {
+//   try {
+//     const tweet = `Automated Tweet at ${new Date().toLocaleTimeString()}`;
+//     await rwClient.v2.tweet(tweet);
+//     console.log(`Tweet sent: ${tweet}`);
+//   } catch (error) {
+//     console.error("Error sending tweet:", error);
+//   }
+// });
 
 // Cron job to reply to mentions every 20 minutes
-cron.schedule("*/20 * * * *", async () => {
-  try {
-    const user = await client.v2.me();
-    const mentions = await client.v2.userMentionTimeline(user.data.id);
-    // We need to check last mention ID to avoid replying to the same mention from redis cache
-    const lastMentionId = await redisClient.get(`${cachePrefix}:lastMentionId`);
-    if (mentions.data.data.length > 0) {
-      // Reply to all unReplied mentions after the last mention ID
-      const unRepliedMentions = mentions.data.data.filter(
-        (mention) => lastMentionId === null || mention.id > lastMentionId
-      );
+// cron.schedule("*/20 * * * *", async () => {
+//   try {
+//     const user = await client.v2.me();
+//     const mentions = await client.v2.userMentionTimeline(user.data.id);
+//     // We need to check last mention ID to avoid replying to the same mention from redis cache
+//     const lastMentionId = await redisClient.get(`${cachePrefix}:lastMentionId`);
+//     if (mentions.data.data.length > 0) {
+//       // Reply to all unReplied mentions after the last mention ID
+//       const unRepliedMentions = mentions.data.data.filter(
+//         (mention) => lastMentionId === null || mention.id > lastMentionId
+//       );
 
-      if (unRepliedMentions.length === 0) {
-        console.log("No new mentions to reply to.");
-        return;
-      }
-      console.log(`Found ${unRepliedMentions.length} new mentions.`);
-      for (const mention of unRepliedMentions) {
-        const replyText = `Thanks for the mention!`;
-        await rwClient.v2.reply(replyText, mention.id);
-        console.log(`Replied to mention: ${mention.id}`);
-      }
-      // Update the last mention ID in Redis
-      await redisClient.set(
-        `${cachePrefix}:lastMentionId`,
-        mentions.data.data[0].id
-      );
-    } else {
-      console.log("No new mentions found.");
-    }
-  } catch (error) {
-    console.error("Error fetching user mentions:", error);
-  }
-});
+//       if (unRepliedMentions.length === 0) {
+//         console.log("No new mentions to reply to.");
+//         return;
+//       }
+//       console.log(`Found ${unRepliedMentions.length} new mentions.`);
+//       for (const mention of unRepliedMentions) {
+//         const replyText = `Thanks for the mention!`;
+//         await rwClient.v2.reply(replyText, mention.id);
+//         console.log(`Replied to mention: ${mention.id}`);
+//       }
+//       // Update the last mention ID in Redis
+//       await redisClient.set(
+//         `${cachePrefix}:lastMentionId`,
+//         mentions.data.data[0].id
+//       );
+//     } else {
+//       console.log("No new mentions found.");
+//     }
+//   } catch (error) {
+//     console.error("Error fetching user mentions:", error);
+//   }
+// });
 
 // Cronjob to send comment to top accounts every 15 minutes. We get the latest tweet in their timeline
-cron.schedule("*/15 * * * *", async () => {
-  try {
-    for (const accountId of topAccountIds) {
-      const timeline = await client.v2.userTimeline(accountId, {
-        max_results: 1,
-      });
-      if (timeline.data.data.length > 0) {
-        const tweetId = timeline.data.data[0].id;
-        const commentText = `Great tweet!`;
-        await rwClient.v2.reply(commentText, tweetId);
-        console.log(`Commented on tweet: ${tweetId}`);
-      } else {
-        console.log(`No tweets found for account ID: ${accountId}`);
-      }
-    }
-  } catch (error) {
-    console.error("Error fetching user timeline:", error);
-  }
-});
+// cron.schedule("*/15 * * * *", async () => {
+//   try {
+//     for (const accountId of topAccountIds) {
+//       const timeline = await client.v2.userTimeline(accountId, {
+//         max_results: 1,
+//       });
+//       if (timeline.data.data.length > 0) {
+//         const tweetId = timeline.data.data[0].id;
+//         const commentText = `Great tweet!`;
+//         await rwClient.v2.reply(commentText, tweetId);
+//         console.log(`Commented on tweet: ${tweetId}`);
+//       } else {
+//         console.log(`No tweets found for account ID: ${accountId}`);
+//       }
+//     }
+//   } catch (error) {
+//     console.error("Error fetching user timeline:", error);
+//   }
+// });
 
 /**
  * API Endpoints
@@ -214,6 +215,22 @@ app.get("/timeline/:username", async (req, res) => {
     const timeline = await client.v2.userTimeline(user.data.id);
     res.json({ success: true, timeline });
   } catch (error) {
+    res.status(500).json({ success: false, error });
+  }
+});
+
+// API endpoint to make deepseek prompt
+app.post("/deepseek", async (req, res) => {
+  try {
+    const { prompt, isComment } = req.body;
+    const response = await deepSeekResponse(prompt, isComment);
+
+    res.json({
+      success: true,
+      response,
+    });
+  } catch (error) {
+    console.error("Error making deepseek prompt:", error);
     res.status(500).json({ success: false, error });
   }
 });
