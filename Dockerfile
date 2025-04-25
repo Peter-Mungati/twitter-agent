@@ -14,4 +14,4 @@ RUN yarn
 # Serve the app
 RUN yarn run build
 
-CMD ["yarn", "run", "dev"]
+CMD ["yarn", "start"]
