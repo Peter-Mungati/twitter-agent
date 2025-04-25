@@ -3,7 +3,11 @@ import { TwitterApi } from "twitter-api-v2";
 import cron from "node-cron";
 import dotenv from "dotenv";
 import { createClient } from "redis";
-import { deepSeekResponse } from "./response";
+import { deepSeekResponse, deepSeekResponsePerHour } from "./response";
+import { geminiResponse } from "./gemini";
+import { trendingNews } from "./news";
+import swaggerUi from "swagger-ui-express";
+import swaggerJsdoc from "swagger-jsdoc";
 
 // Environment variables
 // Load environment variables from .env file
@@ -37,10 +41,32 @@ redisClient.connect().catch(console.error);
 const cachePrefix = "twitter-bot";
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3007;
 
 app.use(express.json());
 
+// Swagger configuration
+const swaggerOptions = {
+  definition: {
+    openapi: "3.0.0",
+    info: {
+      title: "Tweet Agent API For BTC Bot",
+      version: "1.0.0",
+      description: "API documentation for the Tweet Agent BTC Bot",
+    },
+    // servers: [
+    //   {
+    //     url: "http://localhost:3007",
+    //   },
+    // ],
+  },
+  apis: ["./src/**/*.ts"],
+};
+
+const swaggerSpec = swaggerJsdoc(swaggerOptions);
+
+// Serve Swagger docs
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 // Initialize Twitter client
 
 const client = new TwitterApi({
@@ -58,72 +84,61 @@ const rwClient = client.readWrite;
  */
 
 // Cron job to tweet every hour
-// cron.schedule("0 * * * *", async () => {
-//   try {
-//     const tweet = `Automated Tweet at ${new Date().toLocaleTimeString()}`;
-//     await rwClient.v2.tweet(tweet);
-//     console.log(`Tweet sent: ${tweet}`);
-//   } catch (error) {
-//     console.error("Error sending tweet:", error);
-//   }
-// });
+cron.schedule("0 * * * *", async () => {
+  try {
+    const articleTitles: any[] = await trendingNews();
+    // Randomly select an article from the list
+    const randomArticle =
+      articleTitles[Math.floor(Math.random() * articleTitles.length)];
+    const tweet = await geminiResponse(
+      `Create tweet about BTC latest news and headlines in relation to the following headline (max 200 characters): ${randomArticle}`
+    );
+    await client.v2.tweet(tweet);
+    console.log(`Tweet sent: ${tweet}`);
+  } catch (error) {
+    console.error("Error sending tweet:", error);
+  }
+});
 
-// Cron job to reply to mentions every 20 minutes
-// cron.schedule("*/20 * * * *", async () => {
-//   try {
-//     const user = await client.v2.me();
-//     const mentions = await client.v2.userMentionTimeline(user.data.id);
-//     // We need to check last mention ID to avoid replying to the same mention from redis cache
-//     const lastMentionId = await redisClient.get(`${cachePrefix}:lastMentionId`);
-//     if (mentions.data.data.length > 0) {
-//       // Reply to all unReplied mentions after the last mention ID
-//       const unRepliedMentions = mentions.data.data.filter(
-//         (mention) => lastMentionId === null || mention.id > lastMentionId
-//       );
+// // Cron job to reply to mentions every 20 minutes
+cron.schedule("*/17 * * * *", async () => {
+  try {
+    const user = await client.v2.me();
+    const mentions = await client.v2.userMentionTimeline(user.data.id);
+    // We need to check last mention ID to avoid replying to the same mention from redis cache
+    const lastMentionId = await redisClient.get(`${cachePrefix}:lastMentionId`);
+    if (mentions.data.data.length > 0) {
+      // Reply to all unReplied mentions after the last mention ID
+      const unRepliedMentions = mentions.data.data.filter(
+        (mention) => lastMentionId === null || mention.id > lastMentionId
+      );
 
-//       if (unRepliedMentions.length === 0) {
-//         console.log("No new mentions to reply to.");
-//         return;
-//       }
-//       console.log(`Found ${unRepliedMentions.length} new mentions.`);
-//       for (const mention of unRepliedMentions) {
-//         const replyText = `Thanks for the mention!`;
-//         await rwClient.v2.reply(replyText, mention.id);
-//         console.log(`Replied to mention: ${mention.id}`);
-//       }
-//       // Update the last mention ID in Redis
-//       await redisClient.set(
-//         `${cachePrefix}:lastMentionId`,
-//         mentions.data.data[0].id
-//       );
-//     } else {
-//       console.log("No new mentions found.");
-//     }
-//   } catch (error) {
-//     console.error("Error fetching user mentions:", error);
-//   }
-// });
-
-// Cronjob to send comment to top accounts every 15 minutes. We get the latest tweet in their timeline
-// cron.schedule("*/15 * * * *", async () => {
-//   try {
-//     for (const accountId of topAccountIds) {
-//       const timeline = await client.v2.userTimeline(accountId, {
-//         max_results: 1,
-//       });
-//       if (timeline.data.data.length > 0) {
-//         const tweetId = timeline.data.data[0].id;
-//         const commentText = `Great tweet!`;
-//         await rwClient.v2.reply(commentText, tweetId);
-//         console.log(`Commented on tweet: ${tweetId}`);
-//       } else {
-//         console.log(`No tweets found for account ID: ${accountId}`);
-//       }
-//     }
-//   } catch (error) {
-//     console.error("Error fetching user timeline:", error);
-//   }
-// });
+      if (unRepliedMentions.length === 0) {
+        console.log("No new mentions to reply to.");
+        return;
+      }
+      console.log(`Found ${unRepliedMentions.length} new mentions.`);
+      for (const mention of unRepliedMentions) {
+        const replyText = await geminiResponse(
+          `Reply to this tweet like a regular person we loves BTC (if no direct answer, don't give it) : ${mention.text
+            .replace(/@\w+/g, "")
+            .trim()}`
+        );
+        await rwClient.v2.reply(replyText, mention.id);
+        console.log(`Replied to mention: ${mention.id}`);
+      }
+      // Update the last mention ID in Redis
+      await redisClient.set(
+        `${cachePrefix}:lastMentionId`,
+        mentions.data.data[0].id
+      );
+    } else {
+      console.log("No new mentions found.");
+    }
+  } catch (error) {
+    console.error("Error fetching user mentions:", error);
+  }
+});
 
 /**
  * API Endpoints
@@ -136,98 +151,166 @@ const rwClient = client.readWrite;
  */
 
 // API endpoint to post a tweet
-app.post("/tweet", async (req, res) => {
-  try {
-    const { text } = req.body;
-    const tweet = await rwClient.v2.tweet(text);
-    res.json({ success: true, tweet });
-  } catch (error) {
-    res.status(500).json({ success: false, error });
-  }
-});
+// app.post("/tweet", async (req, res) => {
+//   try {
+//     const { text } = req.body;
+//     const tweet = await rwClient.v2.tweet(text);
+//     res.json({ success: true, tweet });
+//   } catch (error) {
+//     res.status(500).json({ success: false, error });
+//   }
+// });
 
-// API endpoint to retweet
-app.post("/retweet/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const user = await client.v2.me();
-    await client.v2.retweet(user.data.id, id);
-    res.json({ success: true, message: `Retweeted ${id}` });
-  } catch (error) {
-    res.status(500).json({ success: false, error });
-  }
-});
+// // API endpoint to retweet
+// app.post("/retweet/:id", async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const user = await client.v2.me();
+//     await client.v2.retweet(user.data.id, id);
+//     res.json({ success: true, message: `Retweeted ${id}` });
+//   } catch (error) {
+//     res.status(500).json({ success: false, error });
+//   }
+// });
 
-// API endpoint to like a tweet
-app.post("/like/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const user = await client.v2.me();
-    await rwClient.v2.like(user.data.id, id);
-    res.json({ success: true, message: `Liked ${id}` });
-  } catch (error) {
-    res.status(500).json({ success: false, error });
-  }
-});
+// // API endpoint to like a tweet
+// app.post("/like/:id", async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const user = await client.v2.me();
+//     await rwClient.v2.like(user.data.id, id);
+//     res.json({ success: true, message: `Liked ${id}` });
+//   } catch (error) {
+//     res.status(500).json({ success: false, error });
+//   }
+// });
 
-// API endpoint to quote tweet
-app.post("/quote/:id", async (req, res) => {
+// // API endpoint to quote tweet
+// app.post("/quote/:id", async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const { comment } = req.body;
+//     const tweet = await rwClient.v2.tweet(
+//       `${comment} https://twitter.com/user/status/${id}`
+//     );
+//     res.json({ success: true, tweet });
+//   } catch (error) {
+//     res.status(500).json({ success: false, error });
+//   }
+// });
+
+// // API endpoint to get user mentions
+// app.get("/mentions", async (req, res) => {
+//   try {
+//     const user = await client.v2.me();
+//     const mentions = await client.v2.userMentionTimeline(user.data.id);
+//     res.json({ success: true, mentions });
+//   } catch (error) {
+//     res.status(500).json({ success: false, error });
+//   }
+// });
+
+// // API endpoint to comment on a tweet
+// app.post("/comment/:id", async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const { comment } = req.body;
+//     const tweet = await rwClient.v2.reply(comment, id);
+//     res.json({ success: true, tweet });
+//   } catch (error) {
+//     res.status(500).json({ success: false, error });
+//   }
+// });
+
+// // API endpoint to get user timeline
+// app.get("/timeline/:username", async (req, res) => {
+//   try {
+//     const { username } = req.params;
+//     const user = await client.v2.userByUsername(username);
+//     const timeline = await client.v2.userTimeline(user.data.id);
+//     res.json({ success: true, timeline });
+//   } catch (error) {
+//     res.status(500).json({ success: false, error });
+//   }
+// });
+
+/**
+ * @swagger
+ * /hourly:
+ *   get:
+ *     summary: Generate a tweet about the latest BTC news
+ *     responses:
+ *       200:
+ *         description: Successfully generated a tweet
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 tweet:
+ *                   type: string
+ */
+app.get("/hourly", async (req, res) => {
   try {
-    const { id } = req.params;
-    const { comment } = req.body;
-    const tweet = await rwClient.v2.tweet(
-      `${comment} https://twitter.com/user/status/${id}`
+    const articleTitles: any[] = await trendingNews();
+    // Randomly select an article from the list
+    const randomArticle =
+      articleTitles[Math.floor(Math.random() * articleTitles.length)];
+    const tweet = await geminiResponse(
+      `Create tweet about BTC latest news and headlines in relation to the following headline (max 200 characters): ${randomArticle}`
     );
-    res.json({ success: true, tweet });
-  } catch (error) {
-    res.status(500).json({ success: false, error });
-  }
-});
-
-// API endpoint to get user mentions
-app.get("/mentions", async (req, res) => {
-  try {
-    const user = await client.v2.me();
-    const mentions = await client.v2.userMentionTimeline(user.data.id);
-    res.json({ success: true, mentions });
-  } catch (error) {
-    res.status(500).json({ success: false, error });
-  }
-});
-
-// API endpoint to comment on a tweet
-app.post("/comment/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { comment } = req.body;
-    const tweet = await rwClient.v2.reply(comment, id);
-    res.json({ success: true, tweet });
-  } catch (error) {
-    res.status(500).json({ success: false, error });
-  }
-});
-
-// API endpoint to get user timeline
-app.get("/timeline/:username", async (req, res) => {
-  try {
-    const { username } = req.params;
-    const user = await client.v2.userByUsername(username);
-    const timeline = await client.v2.userTimeline(user.data.id);
-    res.json({ success: true, timeline });
-  } catch (error) {
-    res.status(500).json({ success: false, error });
-  }
-});
-
-// API endpoint to make deepseek prompt
-app.post("/deepseek", async (req, res) => {
-  try {
-    const { prompt, isComment } = req.body;
-    const response = await deepSeekResponse(prompt, isComment);
 
     res.json({
       success: true,
-      response,
+      tweet,
+    });
+  } catch (error) {
+    console.error("Error making deepseek prompt:", error);
+    res.status(500).json({ success: false, error });
+  }
+});
+
+/**
+ * @swagger
+ * /tweet-response:
+ *   post:
+ *     summary: Get a tweet-style reply to a tweet-related prompt
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               prompt:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Successfully generated a tweet reply
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 tweet:
+ *                   type: string
+ */
+app.post("/tweet-response", async (req, res) => {
+  try {
+    const { prompt } = req.body;
+    const tweet = await geminiResponse(
+      `Reply to this tweet like a regular person we loves BTC (if no direct answer, don't give it) : ${prompt
+        .replace(/@\w+/g, "")
+        .trim()}`
+    );
+
+    res.json({
+      success: true,
+      tweet,
     });
   } catch (error) {
     console.error("Error making deepseek prompt:", error);
