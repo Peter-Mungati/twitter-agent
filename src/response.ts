@@ -38,3 +38,33 @@ export const deepSeekResponse = async (
     return "";
   }
 };
+
+export const deepSeekResponsePerHour = async (
+  content: String
+): Promise<string> => {
+  try {
+    const requestData = {
+      model: "deepseek-r1:7b",
+      messages: [
+        {
+          role: "user",
+          content,
+          // content: `btc price today`,
+        },
+      ],
+    };
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(requestData),
+    });
+    const data = await response.json();
+    return data.choices[0].message.content.split("\n").pop() as string;
+  } catch (error) {
+    console.error("Error making deepseek prompt:", error);
+    return "";
+  }
+};
