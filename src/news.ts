@@ -1,7 +1,7 @@
 export const trendingNews = async () => {
   try {
     const response = await fetch(
-      "https://newsapi.org/v2/everything?q=btc&from=2025-04-16&apiKey=799a9d5f5a954d02a6ea95c323778ce4"
+      "https://newsapi.org/v2/everything?q=btc&from=2025-04-24&apiKey=799a9d5f5a954d02a6ea95c323778ce4"
     );
     const data = await response.json();
     // console.log("data", data);
