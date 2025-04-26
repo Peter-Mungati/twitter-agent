@@ -83,15 +83,15 @@ const rwClient = client.readWrite;
  * - Reply to mentions every 20 minutes
  */
 
-// Cron job to tweet every hour
-cron.schedule("0 * * * *", async () => {
+// Cron job to tweet every 2 hours
+cron.schedule("0 */2 * * *", async () => {
   try {
     const articleTitles: any[] = await trendingNews();
     // Randomly select an article from the list
     const randomArticle =
       articleTitles[Math.floor(Math.random() * articleTitles.length)];
     const tweet = await geminiResponse(
-      `Create tweet about BTC latest news and headlines in relation to the following headline (max 200 characters): ${randomArticle}`
+      `Create tweet about degen/crypto latest news and headlines in relation to the following headline (max 200 characters, no hashtags nor emojis and use singular token tag (eg $BTC, $SOL, $ETH, etc) where necessary ): ${randomArticle}`
     );
     await client.v2.tweet(tweet);
     console.log(`Tweet sent: ${tweet}`);
@@ -120,7 +120,7 @@ cron.schedule("*/17 * * * *", async () => {
       console.log(`Found ${unRepliedMentions.length} new mentions.`);
       for (const mention of unRepliedMentions) {
         const replyText = await geminiResponse(
-          `Reply to this tweet like a regular person we loves BTC (if no direct answer, don't give it) : ${mention.text
+          `Reply to this tweet like a regular person we loves degen and crypto (if no direct answer, don't give it, no hashtags nor emojis and use singular token tag (eg $BTC, $SOL, $ETH, etc) where necessary) : ${mention.text
             .replace(/@\w+/g, "")
             .trim()}`
         );
@@ -259,7 +259,7 @@ app.get("/hourly", async (req, res) => {
     const randomArticle =
       articleTitles[Math.floor(Math.random() * articleTitles.length)];
     const tweet = await geminiResponse(
-      `Create tweet about BTC latest news and headlines in relation to the following headline (max 200 characters): ${randomArticle}`
+      `Create tweet about degen/crypto latest news and headlines in relation to the following headline (max 200 characters, no hashtags nor emojis and use singular token tag (eg $BTC, $SOL, $ETH, etc) where necessary ): ${randomArticle}`
     );
 
     res.json({
@@ -303,7 +303,7 @@ app.post("/tweet-response", async (req, res) => {
   try {
     const { prompt } = req.body;
     const tweet = await geminiResponse(
-      `Reply to this tweet like a regular person we loves BTC (if no direct answer, don't give it) : ${prompt
+      `Reply to this tweet like a regular person we loves degen and crypto (if no direct answer, don't give it, no hashtags nor emojis and use singular token tag (eg $BTC, $SOL, $ETH, etc) where necessary) : ${prompt
         .replace(/@\w+/g, "")
         .trim()}`
     );
